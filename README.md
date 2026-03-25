@@ -59,9 +59,19 @@ For each step, throw away all code and get back to main, use this prompt, unless
 
 ## Run
 
+### Java
+
 ```bash
+cd java
 mvn -q compile
 java -cp target/classes com.kata.warehouse.Main
+```
+
+### Python
+
+```bash
+cd python
+python main.py
 ```
 
 
