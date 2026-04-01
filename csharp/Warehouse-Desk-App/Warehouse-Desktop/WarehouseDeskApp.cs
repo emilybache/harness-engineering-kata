@@ -12,7 +12,12 @@ namespace Warehouse_Desktop
         private readonly Dictionary<string, string> orderStatus = new Dictionary<string, string>();
         private readonly Dictionary<string, string> orderSku = new Dictionary<string, string>();
         private readonly Dictionary<string, int> orderQty = new Dictionary<string, int>();
+        private readonly Dictionary<string, string> reservationSku = new Dictionary<string, string>();
+        private readonly Dictionary<string, int> reservationQty = new Dictionary<string, int>();
+        private readonly Dictionary<string, DateTime> reservationExpiry = new Dictionary<string, DateTime>();
+        private readonly Dictionary<string, string> reservationCustomer = new Dictionary<string, string>();
         private readonly List<string> eventLog = new List<string>();
+        public IReadOnlyList<string> EventLog => eventLog.AsReadOnly();
         private double cashBalance;
         private int nextOrderNumber;
 
@@ -61,6 +66,12 @@ namespace Warehouse_Desktop
 
         public void ProcessLine(string line)
         {
+            ProcessLine(line, DateTime.Now);
+        }
+
+        public void ProcessLine(string line, DateTime currentTime)
+        {
+            ExpireReservations(currentTime);
             string[] parts = line.Split(';');
             string type = parts[0];
 
@@ -149,6 +160,86 @@ namespace Warehouse_Desktop
                 return;
             }
 
+            if ("RESERVE".Equals(type))
+            {
+                string customer = parts[1];
+                string sku = parts[2];
+                int qty = ParseInt(parts[3]);
+                int minutes = ParseInt(parts[4]);
+
+                int onHand = stockBySku.GetValueOrDefault(sku, 0);
+                int reserved = reservedBySku.GetValueOrDefault(sku, 0);
+                int available = onHand - reserved;
+
+                if (available < qty)
+                {
+                    eventLog.Add("cannot reserve " + qty + " of " + sku + " for " + customer + ": insufficient stock");
+                }
+                else
+                {
+                    string resId = "R" + nextOrderNumber;
+                    nextOrderNumber++;
+                    reservationSku[resId] = sku;
+                    reservationQty[resId] = qty;
+                    reservationCustomer[resId] = customer;
+                    reservationExpiry[resId] = currentTime.AddMinutes(minutes);
+
+                    reservedBySku[sku] = reserved + qty;
+                    eventLog.Add("reserved " + qty + " of " + sku + " for " + customer + " (id=" + resId + ")");
+                }
+                return;
+            }
+
+            if ("CONFIRM".Equals(type))
+            {
+                string resId = parts[1];
+                if (reservationSku.TryGetValue(resId, out string? sku))
+                {
+                    int qty = reservationQty[resId];
+                    string customer = reservationCustomer[resId];
+
+                    // Ship it
+                    stockBySku[sku] -= qty;
+                    reservedBySku[sku] -= qty;
+
+                    string orderId = "O" + nextOrderNumber++;
+                    orderSku[orderId] = sku;
+                    orderQty[orderId] = qty;
+                    orderStatus[orderId] = "SHIPPED";
+
+                    double unitPrice = priceBySku.GetValueOrDefault(sku, 0.0);
+                    double orderTotal = unitPrice * qty;
+                    cashBalance += orderTotal;
+
+                    // Remove reservation
+                    RemoveReservation(resId);
+
+                    eventLog.Add("reservation " + resId + " confirmed and shipped as " + orderId);
+                }
+                else
+                {
+                    eventLog.Add("cannot confirm " + resId + ": reservation expired or not found");
+                }
+                return;
+            }
+
+            if ("RELEASE".Equals(type))
+            {
+                string resId = parts[1];
+                if (reservationSku.TryGetValue(resId, out string? sku))
+                {
+                    int qty = reservationQty[resId];
+                    reservedBySku[sku] -= qty;
+                    RemoveReservation(resId);
+                    eventLog.Add("reservation " + resId + " released");
+                }
+                else
+                {
+                    eventLog.Add("cannot release " + resId + ": reservation expired or not found");
+                }
+                return;
+            }
+
             if ("DUMP".Equals(type))
             {
                 Console.WriteLine("---- dump ----");
@@ -160,6 +251,31 @@ namespace Warehouse_Desktop
             }
 
             eventLog.Add("unknown command: " + line);
+        }
+
+        private void ExpireReservations(DateTime currentTime)
+        {
+            var expiredIds = reservationExpiry
+                .Where(kvp => kvp.Value <= currentTime)
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            foreach (var resId in expiredIds)
+            {
+                string sku = reservationSku[resId];
+                int qty = reservationQty[resId];
+                reservedBySku[sku] -= qty;
+                RemoveReservation(resId);
+                eventLog.Add("reservation " + resId + " expired");
+            }
+        }
+
+        private void RemoveReservation(string resId)
+        {
+            reservationSku.Remove(resId);
+            reservationQty.Remove(resId);
+            reservationCustomer.Remove(resId);
+            reservationExpiry.Remove(resId);
         }
 
         private int ParseInt(string value)

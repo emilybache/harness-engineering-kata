@@ -1,1 +1,1 @@
-
+write unit tests for new features. Put them in a separate project. Use NUnit. Use the Arrange-Act-Assert pattern in tests. Be sure to check all important outcomes. Do not use 'sleep' in tests. If you need to set the current time in tests, make the current time a parameter so the tests can pass in a different (fixed) value.
