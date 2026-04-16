@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -169,7 +169,7 @@ namespace Warehouse_Desktop
 
         private double ParseDouble(string value)
         {
-            return double.Parse(value.Trim());
+            return double.Parse(value.Trim(), System.Globalization.CultureInfo.InvariantCulture);
         }
 
         public void PrintEndOfDayReport()
